@@ -1,4 +1,4 @@
-var xim_version = "0.72";
+var xim_version = "0.73";
 var WebSocketServer = require('websocket').server;
 var http = require('http');
 var minimum_build = 300;
@@ -15,6 +15,7 @@ var crypto = require('crypto');
 var ban_list = new Array();
 var pins = new Array();
 var pins_url = new Array();
+var reset_array = new Array();
 var should_save_pins = false;
 var should_save_cached = false;
 var accept_connections = true;
@@ -604,7 +605,89 @@ function process(connection, data) {
 		return;
 	
 	}
+
+
+	/*
+		Function XIM_RESET
+		Usage: XIM_RESET Username
+		Return: XIM_RESET Hash
+	*/
 	
+	if (data.substring(0, 10) === "XIM_RESET ") {
+
+	    var m_array = data.substring(10).split(";");
+
+	    if (m_array.length !== 1 || m_array[0] === "") {
+	        // Fishy things going on.
+	        console.log("[ DBG ] PE: Incorrect XIM_RESP array size");
+	        give_protocol_error(connection);
+	        return;
+	    }
+
+	    // Retrieve what we received.
+	    var m_url = m_array[0];
+
+	    // Computate hash.
+	    var m_generated = makeid();
+
+	    // Lets store the info
+	    reset_array[connection.socket_id]={'url': m_url, 'key': m_generated};
+
+	    connection.sendUTF("XIM_RESET " + m_generated);
+	    return;
+	}
+
+	/*
+		Function XIM_RESET_CHECK
+		Usage: XIM_RESET_CHECK Post_id
+		Return: Success - XIM_RESET_RESPONSE 1
+				Failure - XIM_RESET_RESPONSE 0
+	*/
+
+	if (data.substring(0, 16) === "XIM_RESET_CHECK ") {
+
+	    var m_array = data.substring(16).split(";");
+
+	    if (m_array.length !== 1 || m_array[0] === "") {
+	        // Fishy things going on.
+	        console.log("[ DBG ] PE: Incorrect XIM_RESET_CHECK array size");
+	        give_protocol_error(connection);
+	        return;
+	    }
+
+	    // Retrieve what we received.
+	    var m_id = m_array[0];
+
+	    var options = {
+	        host: reset_array[connection.socket_id].url + '.tumblr.com',
+	        port: 80,
+	        path: '/api/read/json?id=' + m_id,
+	        method: 'GET'
+	    };
+
+	    var req = http.get(options, function (res) {
+	        var pageData = "";
+	        res.setEncoding('utf8');
+	        res.on('data', function (chunk) {
+	            pageData += chunk;
+	        });
+
+	        res.on('end', function () {
+	            postData = JSON.parse(pageData.split(" = ")[1].split(";")[0]);
+	            if (postData.posts[0]["regular-body"].indexOf(reset_array[connection.socket_id].key) != -1 ) { //Meh post formatting is annoying - check indexOf
+	                set_pin(reset_array[connection.socket_id].url, "0000");
+	                connection.sendUTF("XIM_RESET_RESPONSE 1");
+	            } else {
+	                connection.sendUTF("XIM_RESET_RESPONSE 0");
+	            }
+	            reset_array.splice[connection.socket_id]; //Get rid of the temp data and free up memory
+	        });
+	    });
+
+	    return;
+	}
+
+
 	// From here, we need to check if the client passes hash check.
 	// If they did not, we gotta kick them.
 	if (connection.hash_passed === false) {
